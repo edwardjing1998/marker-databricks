@@ -1,0 +1,14 @@
+# Keyless development: isolate gateway ingress. Egress is not restricted here.
+# NetworkPolicies are additive; an administrator must review other allow policies.
+# Authenticated API-server/kubelet port-forwarding is the supported access path.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: marker-databricks-private
+spec:
+  podSelector:
+    matchLabels:
+      app: marker-databricks
+  policyTypes:
+    - Ingress
+  ingress: []

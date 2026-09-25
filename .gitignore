@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+.DS_Store
+databricks/deployed-job.json
+openshift/rendered.yml
+
+# User-filled local configuration; never commit credentials.
+config/development.variables.env

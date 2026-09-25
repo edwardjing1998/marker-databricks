@@ -1,0 +1,176 @@
+name: Deploy marker-databricks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: marker-databricks-development
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: development
+    env:
+      OPENSHIFT_SERVER: ${{ vars.OPENSHIFT_SERVER }}
+      OPENSHIFT_NAMESPACE: ${{ vars.OPENSHIFT_NAMESPACE }}
+      OPENSHIFT_TOKEN: ${{ secrets.OPENSHIFT_TOKEN }}
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      DATABRICKS_AUTH_TYPE: oauth-m2m
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_SECRET_SCOPE: ${{ vars.DATABRICKS_SECRET_SCOPE || 'marker-databricks' }}
+      DATABRICKS_ENVIRONMENT_VERSION: ${{ vars.DATABRICKS_ENVIRONMENT_VERSION || '6' }}
+      DATABRICKS_RUN_AS_SERVICE_PRINCIPAL: ${{ vars.DATABRICKS_RUN_AS_SERVICE_PRINCIPAL }}
+      AZURE_STORAGE_ENDPOINT: ${{ vars.AZURE_STORAGE_ENDPOINT }}
+      AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER || 'education' }}
+      AZURE_STORAGE_SOURCE_PREFIX: ${{ vars.AZURE_STORAGE_SOURCE_PREFIX || 'source/' }}
+      AZURE_STORAGE_OUTPUT_PREFIX: ${{ vars.AZURE_STORAGE_OUTPUT_PREFIX || 'generated/' }}
+      SOURCE_VOLUME_PATH: ${{ vars.SOURCE_VOLUME_PATH }}
+      OUTPUT_VOLUME_PATH: ${{ vars.OUTPUT_VOLUME_PATH }}
+      STATE_VOLUME_PATH: ${{ vars.STATE_VOLUME_PATH }}
+      GPU_FALLBACK_ENABLED: ${{ vars.GPU_FALLBACK_ENABLED || 'false' }}
+      GPU_LAUNCH_AUTH: oauth-m2m
+      CPU_MAX_PAGES: ${{ vars.CPU_MAX_PAGES || '20' }}
+      CPU_MAX_FILE_MB: ${{ vars.CPU_MAX_FILE_MB || '20' }}
+      CPU_TIMEOUT_SECONDS: ${{ vars.CPU_TIMEOUT_SECONDS || '900' }}
+      CPU_MAX_RSS_MB: ${{ vars.CPU_MAX_RSS_MB || '6000' }}
+      GPU_TIMEOUT_SECONDS: ${{ vars.GPU_TIMEOUT_SECONDS || '7200' }}
+      GPU_WAIT_SECONDS: ${{ vars.GPU_WAIT_SECONDS || '7800' }}
+      MAX_SCAN_FILES: ${{ vars.MAX_SCAN_FILES || '10000' }}
+      JOB_COMPUTE_MODE: ${{ vars.JOB_COMPUTE_MODE || 'cpu' }}
+      DATABRICKS_GPU_ACCELERATOR: ${{ vars.DATABRICKS_GPU_ACCELERATOR || 'GPU_1xA10' }}
+      MAX_FILE_MB: ${{ vars.MAX_FILE_MB || '200' }}
+      MAX_DOCUMENT_PAGES: ${{ vars.MAX_DOCUMENT_PAGES || '5000' }}
+      JOB_TIMEOUT_SECONDS: ${{ vars.JOB_TIMEOUT_SECONDS || '21600' }}
+      MARKER_CACHE_REVISION: ${{ vars.MARKER_CACHE_REVISION || 'cpu-first-v3' }}
+      JOB_DEFAULT_DRY_RUN: ${{ vars.JOB_DEFAULT_DRY_RUN || 'true' }}
+      JOB_MAX_FILES: ${{ vars.JOB_MAX_FILES || '1' }}
+      JOB_SCHEDULE_CRON: ${{ vars.JOB_SCHEDULE_CRON }}
+      JOB_SCHEDULE_TIMEZONE: ${{ vars.JOB_SCHEDULE_TIMEZONE || 'America/Los_Angeles' }}
+      JOB_SCHEDULE_PAUSE_STATUS: ${{ vars.JOB_SCHEDULE_PAUSE_STATUS || 'PAUSED' }}
+      GHCR_USERNAME: ${{ vars.GHCR_USERNAME || secrets.GHCR_USERNAME || github.repository_owner }}
+      GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in OPENSHIFT_SERVER OPENSHIFT_NAMESPACE OPENSHIFT_TOKEN DATABRICKS_HOST DATABRICKS_CLIENT_ID DATABRICKS_CLIENT_SECRET AZURE_STORAGE_ENDPOINT SOURCE_VOLUME_PATH OUTPUT_VOLUME_PATH STATE_VOLUME_PATH GHCR_USERNAME GHCR_PULL_TOKEN; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing GitHub development Environment variable/secret: $name"
+              exit 1
+            fi
+          done
+      - name: Install dependencies and run offline tests
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q
+          python -m compileall -q api shared worker jobs scripts
+      - name: Verify Databricks OAuth without starting compute
+        run: python scripts/check_oauth.py
+      - name: Deploy and verify CPU-first PySpark Python-script job
+        id: databricks
+        run: python scripts/deploy_databricks.py
+      - name: Normalize image name
+        shell: bash
+        run: |
+          IMAGE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/marker-databricks"
+          echo "IMAGE_REPOSITORY=${IMAGE_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: latest
+      - name: Log in to OpenShift
+        shell: bash
+        run: |
+          set -euo pipefail
+          oc login "$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN"
+          oc project "$OPENSHIFT_NAMESPACE"
+      - name: Remove the old public route and isolate keyless API ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          oc delete route marker-databricks --ignore-not-found=true
+          oc apply -f openshift/network-policy.yml
+          python scripts/check_private_exposure.py
+      - name: Configure this application's registry secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          oc create secret docker-registry marker-databricks-ghcr \
+            --docker-server=ghcr.io \
+            --docker-username="$GHCR_USERNAME" \
+            --docker-password="$GHCR_PULL_TOKEN" \
+            --dry-run=client -o yaml | oc apply -f -
+      - name: Configure gateway
+        shell: bash
+        env:
+          DATABRICKS_JOB_ID: ${{ steps.databricks.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          oc create configmap marker-databricks-config \
+            --from-literal=DATABRICKS_HOST="$DATABRICKS_HOST" \
+            --from-literal=DATABRICKS_AUTH_TYPE=oauth-m2m \
+            --from-literal=DATABRICKS_JOB_ID="$DATABRICKS_JOB_ID" \
+            --from-literal=GPU_FALLBACK_ENABLED="$GPU_FALLBACK_ENABLED" \
+            --from-literal=AZURE_STORAGE_CONTAINER="$AZURE_STORAGE_CONTAINER" \
+            --from-literal=AZURE_STORAGE_SOURCE_PREFIX="$AZURE_STORAGE_SOURCE_PREFIX" \
+            --from-literal=AZURE_STORAGE_OUTPUT_PREFIX="$AZURE_STORAGE_OUTPUT_PREFIX" \
+            --dry-run=client -o yaml | oc apply -f -
+          python scripts/configure_gateway_secret.py
+          # Delete only obsolete fields for THIS application, not shared secrets.
+          oc patch secret marker-databricks-secret --type=merge \
+            -p '{"data":{"DATABRICKS_TOKEN":null,"MARKER_API_KEY":null}}'
+      - name: Render and apply OpenShift resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -e "s|REPLACE_IMAGE|${IMAGE_REPOSITORY}:${GITHUB_SHA}|g" \
+              -e "s|REPLACE_DEPLOY_ID|${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}|g" \
+              openshift/app.yml > openshift/rendered.yml
+          oc apply -f openshift/rendered.yml
+          oc rollout status deployment/marker-databricks --timeout=300s
+          oc get deployment marker-databricks
+          oc get pods -l app=marker-databricks
+          python scripts/check_private_exposure.py
+          bash scripts/check_gateway_health.sh
+          echo "No public Route. Access with: oc -n $OPENSHIFT_NAMESPACE port-forward --address=127.0.0.1 deployment/marker-databricks 8080:8080"
+          {
+            echo "### Private keyless development deployment (Databricks OAuth M2M)"
+            echo "Application: marker-databricks; namespace: $OPENSHIFT_NAMESPACE"
+            echo 'The old public Route was removed. No client API key is required.'
+            echo 'Use an authenticated local OpenShift port-forward; do not expose this API publicly.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload non-secret deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: marker-databricks-deployment
+          path: databricks/deployed-job.json
+      - name: Log out of OpenShift
+        if: always()
+        run: oc logout || true

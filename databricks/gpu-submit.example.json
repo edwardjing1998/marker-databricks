@@ -1,0 +1,38 @@
+{
+  "run_name": "marker-gpu-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "idempotency_token": "49c6a7a9702fef9d27a1bc17cb2a38f00c3875e3b008dbf5e25c8762123f4761",
+  "timeout_seconds": 7200,
+  "tasks": [
+    {
+      "task_key": "marker_gpu",
+      "max_retries": 0,
+      "retry_on_timeout": false,
+      "timeout_seconds": 7200,
+      "environment_key": "marker_gpu",
+      "ai_runtime_task": {
+        "experiment": "marker-cpu-first-gpu",
+        "mlflow_experiment_directory": "/Workspace/Shared/marker-databricks",
+        "deployments": [
+          {
+            "command_path": "/Workspace/Shared/marker-databricks/gpu-requests/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/run.sh",
+            "compute": {
+              "accelerator_type": "GPU_1xA10",
+              "accelerator_count": 1
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "marker_gpu",
+      "spec": {
+        "environment_version": "6",
+        "dependencies": [
+          "-r /Workspace/Shared/marker-databricks/releases/EXAMPLE/requirements-gpu.txt"
+        ]
+      }
+    }
+  ]
+}

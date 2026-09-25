@@ -1,0 +1,114 @@
+{
+  "name": "marker-databricks",
+  "description": "CPU-first PySpark discovery + local Marker. Explicit optional GPU child; no notebooks.",
+  "max_concurrent_runs": 1,
+  "queue": {
+    "enabled": true
+  },
+  "timeout_seconds": 21600,
+  "tags": {
+    "managed_by": "marker-databricks",
+    "github_repo": "YOUR-ACCOUNT/marker-databricks",
+    "inference": "marker-cpu-first"
+  },
+  "parameters": [
+    {
+      "name": "source_prefix",
+      "default": "source/"
+    },
+    {
+      "name": "output_prefix",
+      "default": "generated/"
+    },
+    {
+      "name": "max_files",
+      "default": "1"
+    },
+    {
+      "name": "overwrite",
+      "default": "false"
+    },
+    {
+      "name": "replace_existing",
+      "default": "false"
+    },
+    {
+      "name": "dry_run",
+      "default": "true"
+    },
+    {
+      "name": "pages_per_chunk",
+      "default": "2"
+    },
+    {
+      "name": "force_ocr",
+      "default": "false"
+    },
+    {
+      "name": "drop_handwriting",
+      "default": "false"
+    },
+    {
+      "name": "compute_mode",
+      "default": "cpu"
+    },
+    {
+      "name": "request_id",
+      "default": ""
+    }
+  ],
+  "tasks": [
+    {
+      "task_key": "process_documents_cpu",
+      "max_retries": 0,
+      "retry_on_timeout": false,
+      "disable_auto_optimization": true,
+      "timeout_seconds": 21600,
+      "spark_python_task": {
+        "python_file": "/Workspace/Shared/marker-databricks/releases/EXAMPLE-ONLY/jobs/process_documents.py",
+        "source": "WORKSPACE",
+        "parameters": [
+          "--config-file",
+          "/Workspace/Shared/marker-databricks/releases/EXAMPLE-ONLY/deployment-config.json",
+          "--source-prefix",
+          "{{job.parameters.source_prefix}}",
+          "--output-prefix",
+          "{{job.parameters.output_prefix}}",
+          "--max-files",
+          "{{job.parameters.max_files}}",
+          "--overwrite",
+          "{{job.parameters.overwrite}}",
+          "--replace-existing",
+          "{{job.parameters.replace_existing}}",
+          "--dry-run",
+          "{{job.parameters.dry_run}}",
+          "--pages-per-chunk",
+          "{{job.parameters.pages_per_chunk}}",
+          "--force-ocr",
+          "{{job.parameters.force_ocr}}",
+          "--drop-handwriting",
+          "{{job.parameters.drop_handwriting}}",
+          "--compute-mode",
+          "{{job.parameters.compute_mode}}",
+          "--request-id",
+          "{{job.parameters.request_id}}"
+        ]
+      },
+      "environment_key": "marker_cpu"
+    }
+  ],
+  "environments": [
+    {
+      "environment_key": "marker_cpu",
+      "spec": {
+        "environment_version": "6",
+        "dependencies": [
+          "-r /Workspace/Shared/marker-databricks/releases/EXAMPLE-ONLY/requirements-cpu.txt"
+        ]
+      }
+    }
+  ],
+  "run_as": {
+    "service_principal_name": "00000000-0000-0000-0000-000000000001"
+  }
+}

@@ -1,0 +1,33 @@
+name: Test marker-databricks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+      - run: python -m compileall -q api shared worker jobs scripts
+
+  spark-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      # Test-only installation. Never add pyspark to Databricks runtime dependencies.
+      - run: python -m pip install -r requirements-dev.txt 'pyspark==4.0.1'
+      - run: python -m pytest -q tests/test_spark_integration.py
