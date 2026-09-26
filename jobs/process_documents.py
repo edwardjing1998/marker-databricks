@@ -16,8 +16,6 @@ def _project_root() -> Path:
         )
         return root
 
-    # Databricks spark_python_task wrapper exposes
-    # the script path as `filename`
     databricks_filename = globals().get("filename")
 
     if databricks_filename:
@@ -28,7 +26,6 @@ def _project_root() -> Path:
         )
         return root
 
-    # Last-resort fallback
     root = Path.cwd()
 
     print(
@@ -49,8 +46,27 @@ print(
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
     print(
-        f"[MARKER] added PROJECT_ROOT to sys.path",
+        "[MARKER] added PROJECT_ROOT to sys.path",
         flush=True,
     )
 
 print("[MARKER] bootstrap completed", flush=True)
+
+
+# ============================================================
+# ACTUAL APPLICATION CODE MUST CONTINUE HERE
+# ============================================================
+
+print("[MARKER] importing application modules", flush=True)
+
+from shared.defaults import PARAM_DEFAULTS
+from worker.config import Config
+
+print("[MARKER] application modules imported", flush=True)
+
+# ... parameter parsing
+# ... Config creation
+# ... source file discovery
+# ... Marker conversion
+# ... output writing
+# ... report/state writing
