@@ -33,38 +33,94 @@ TERMINAL = {
 
 
 def runtime_api(spark, config):
-    def secret(key):
-        if not re.fullmatch(
-            "[A-Za-z0-9_.-]{1,128}",
-            config.secret_scope,
-        ):
-            raise PipelineError(
-                "Invalid launcher secret scope"
-            )
+    """
+    Build the Databricks REST client used by the parent CPU job
+    to submit and monitor the GPU child run.
 
-        # Literal scope/key only.
-        # Never print, persist, or return secret values.
-        return spark.sql(
-            f"SELECT secret("
-            f"'{config.secret_scope}', "
-            f"'{key}') AS value"
-        ).first()["value"]
+    Important:
+    Do NOT use Spark SQL secret():
+
+        SELECT secret(...)
+
+    for OAuth credentials here. In this runtime the value returned
+    to Python can be the literal redacted value "[REDACTED]".
+
+    Use DBUtils Secrets instead. The real value is available to
+    application code while Databricks still redacts it from logs.
+    """
 
     if config.gpu_launch_auth != "oauth-m2m":
         raise PipelineError(
             "GPU launcher requires oauth-m2m"
         )
 
-    client_id = secret(
-        "gpu-launch-client-id"
-    )
+    if not re.fullmatch(
+        r"[A-Za-z0-9_.-]{1,128}",
+        config.secret_scope,
+    ):
+        raise PipelineError(
+            "Invalid launcher secret scope"
+        )
 
-    client_secret = secret(
-        "gpu-launch-client-secret"
-    )
+    try:
+        from pyspark.dbutils import DBUtils
 
-    # Safe diagnostics only.
-    # Never print the actual client ID or client secret.
+        dbutils = DBUtils(spark)
+
+    except Exception as exc:
+        raise PipelineError(
+            "Unable to initialize DBUtils for "
+            "GPU launcher secret access: "
+            f"{type(exc).__name__}"
+        ) from None
+
+    try:
+        client_id = dbutils.secrets.get(
+            scope=config.secret_scope,
+            key="gpu-launch-client-id",
+        )
+
+        client_secret = dbutils.secrets.get(
+            scope=config.secret_scope,
+            key="gpu-launch-client-secret",
+        )
+
+    except Exception as exc:
+        raise PipelineError(
+            "Unable to read GPU launcher OAuth secrets "
+            f"from scope '{config.secret_scope}': "
+            f"{type(exc).__name__}: {exc}"
+        ) from None
+
+    if not client_id:
+        raise PipelineError(
+            "gpu-launch-client-id is empty"
+        )
+
+    if not client_secret:
+        raise PipelineError(
+            "gpu-launch-client-secret is empty"
+        )
+
+    if client_id == "[REDACTED]":
+        raise PipelineError(
+            "gpu-launch-client-id was returned as "
+            "[REDACTED] instead of the real value"
+        )
+
+    if client_secret == "[REDACTED]":
+        raise PipelineError(
+            "gpu-launch-client-secret was returned as "
+            "[REDACTED] instead of the real value"
+        )
+
+    #
+    # Safe temporary diagnostics.
+    #
+    # These do NOT print the actual credentials.
+    # Once GPU authentication works, you may remove
+    # the SHA-256 diagnostic lines.
+    #
     print(
         "[MARKER][GPU][AUTH] "
         f"workspace_host={config.workspace_host}",
