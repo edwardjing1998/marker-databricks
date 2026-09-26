@@ -772,19 +772,48 @@ def test_gpu_launcher_reads_oauth_pair_only(
 ):
     spark = Mock()
 
-    def sql(query):
-        return Mock(
-            first=lambda: {
-                "value": (
-                    CLIENT_ID
-                    if "gpu-launch-client-id"
-                    in query
-                    else SECRET
-                )
-            }
+    secrets = Mock()
+
+    def get_secret(*, scope, key):
+        assert scope == cfg.secret_scope
+
+        if key == "gpu-launch-client-id":
+            return CLIENT_ID
+
+        if key == "gpu-launch-client-secret":
+            return SECRET
+
+        raise AssertionError(
+            f"Unexpected secret key: {key}"
         )
 
-    spark.sql.side_effect = sql
+    secrets.get.side_effect = get_secret
+
+    dbutils = Mock()
+    dbutils.secrets = secrets
+
+    class FakeDBUtils:
+        def __init__(self, spark_arg):
+            assert spark_arg is spark
+
+        @property
+        def secrets(self):
+            return secrets
+
+    import sys
+    import types
+
+    fake_pyspark_dbutils = types.ModuleType(
+        "pyspark.dbutils"
+    )
+
+    fake_pyspark_dbutils.DBUtils = FakeDBUtils
+
+    monkeypatch.setitem(
+        sys.modules,
+        "pyspark.dbutils",
+        fake_pyspark_dbutils,
+    )
 
     factory = Mock()
 
@@ -804,13 +833,16 @@ def test_gpu_launcher_reads_oauth_pair_only(
         "client_secret": SECRET,
     }
 
-    assert spark.sql.call_count == 2
+    assert secrets.get.call_count == 2
 
-    assert all(
-        "gpu-launch-token"
-        not in call.args[0]
-        for call
-        in spark.sql.call_args_list
+    secrets.get.assert_any_call(
+        scope=cfg.secret_scope,
+        key="gpu-launch-client-id",
+    )
+
+    secrets.get.assert_any_call(
+        scope=cfg.secret_scope,
+        key="gpu-launch-client-secret",
     )
 
 
