@@ -10,39 +10,71 @@ print("[MARKER] process_documents.py STARTED", flush=True)
 
 
 def _project_root() -> Path:
+    """
+    Resolve the project root.
+
+    Normal Python execution provides __file__.
+    The Databricks spark_python_task wrapper may instead expose
+    the script path through the global variable `filename`.
+    """
+
     script_file = globals().get("__file__")
 
     if script_file:
         root = Path(script_file).resolve().parents[1]
-        print(f"[MARKER] project root from __file__: {root}", flush=True)
+
+        print(
+            f"[MARKER] project root from __file__: {root}",
+            flush=True,
+        )
+
         return root
 
-    # Databricks spark_python_task wrapper may expose the script path as `filename`
     databricks_filename = globals().get("filename")
 
     if databricks_filename:
         root = Path(databricks_filename).resolve().parents[1]
+
         print(
             f"[MARKER] project root from Databricks filename: {root}",
             flush=True,
         )
+
         return root
 
+    # Last-resort fallback
     root = Path.cwd()
-    print(f"[MARKER] project root from cwd: {root}", flush=True)
+
+    print(
+        f"[MARKER] project root from cwd: {root}",
+        flush=True,
+    )
+
     return root
 
 
 PROJECT_ROOT = _project_root()
 
-print(f"[MARKER] PROJECT_ROOT={PROJECT_ROOT}", flush=True)
+print(
+    f"[MARKER] PROJECT_ROOT={PROJECT_ROOT}",
+    flush=True,
+)
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-    print("[MARKER] added PROJECT_ROOT to sys.path", flush=True)
+
+    print(
+        "[MARKER] added PROJECT_ROOT to sys.path",
+        flush=True,
+    )
+
 
 print("[MARKER] bootstrap completed", flush=True)
 
+
+# ------------------------------------------------------------------
+# Application imports
+# ------------------------------------------------------------------
 
 print("[MARKER] importing application modules", flush=True)
 
@@ -56,8 +88,16 @@ print("[MARKER] application modules imported", flush=True)
 def main():
     print("[MARKER] main started", flush=True)
 
+    # --------------------------------------------------------------
+    # Parse Databricks job parameters
+    # --------------------------------------------------------------
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config-file", required=True)
+
+    parser.add_argument(
+        "--config-file",
+        required=True,
+    )
 
     for name, default in PARAM_DEFAULTS.items():
         parser.add_argument(
@@ -68,14 +108,24 @@ def main():
     args = vars(parser.parse_args())
 
     print(
-        f"[MARKER] arguments parsed: "
+        "[MARKER] arguments parsed: "
         f"source_prefix={args.get('source_prefix')}, "
         f"output_prefix={args.get('output_prefix')}, "
         f"max_files={args.get('max_files')}, "
+        f"overwrite={args.get('overwrite')}, "
+        f"replace_existing={args.get('replace_existing')}, "
         f"dry_run={args.get('dry_run')}, "
-        f"compute_mode={args.get('compute_mode')}",
+        f"pages_per_chunk={args.get('pages_per_chunk')}, "
+        f"force_ocr={args.get('force_ocr')}, "
+        f"drop_handwriting={args.get('drop_handwriting')}, "
+        f"compute_mode={args.get('compute_mode')}, "
+        f"request_id={args.get('request_id')}",
         flush=True,
     )
+
+    # --------------------------------------------------------------
+    # Load fixed deployment configuration
+    # --------------------------------------------------------------
 
     config_file = args.pop("config_file")
 
@@ -84,32 +134,70 @@ def main():
         flush=True,
     )
 
-    fixed = json.loads(Path(config_file).read_text())
-
-    config = Config.from_values(fixed, args)
+    fixed = json.loads(
+        Path(config_file).read_text()
+    )
 
     print(
-        f"[MARKER] config created: "
+        "[MARKER] deployment config loaded",
+        flush=True,
+    )
+
+    # --------------------------------------------------------------
+    # Create worker configuration
+    # --------------------------------------------------------------
+
+    config = Config.from_values(
+        fixed,
+        args,
+    )
+
+    print(
+        "[MARKER] Config created: "
         f"request_id={config.request_id}, "
-        f"source_volume={config.source_volume}, "
-        f"output_volume={config.output_volume}, "
-        f"state_volume={config.state_volume}, "
         f"dry_run={config.dry_run}",
+        flush=True,
+    )
+
+    # --------------------------------------------------------------
+    # Obtain runtime-provided Spark session
+    # --------------------------------------------------------------
+
+    print(
+        "[MARKER] importing SparkSession",
         flush=True,
     )
 
     from pyspark.sql import SparkSession
 
-    print("[MARKER] creating/getting SparkSession", flush=True)
+    print(
+        "[MARKER] getting SparkSession",
+        flush=True,
+    )
 
+    # Runtime-provided Spark / Spark Connect.
+    # Do not pip-install pyspark in this project.
     spark = SparkSession.builder.getOrCreate()
 
-    print("[MARKER] SparkSession ready", flush=True)
+    print(
+        "[MARKER] SparkSession ready",
+        flush=True,
+    )
+
+    # --------------------------------------------------------------
+    # Execute Marker processing pipeline
+    # --------------------------------------------------------------
 
     try:
-        print("[MARKER] starting run_pipeline()", flush=True)
+        print(
+            "[MARKER] starting run_pipeline()",
+            flush=True,
+        )
 
-        report = run_pipeline(config, spark)
+        report = run_pipeline(
+            config,
+            spark,
+        )
 
         print(
             "[MARKER] run_pipeline() completed",
@@ -118,7 +206,7 @@ def main():
 
     except Exception as exc:
         print(
-            f"[MARKER] run_pipeline() FAILED: "
+            "[MARKER] run_pipeline() FAILED: "
             f"{type(exc).__name__}: {exc}",
             flush=True,
         )
@@ -136,10 +224,17 @@ def main():
             "finishedAt": utc_now(),
             "error": (
                 str(exc)
-                if isinstance(exc, (PipelineError, ValueError))
+                if isinstance(
+                    exc,
+                    (PipelineError, ValueError),
+                )
                 else type(exc).__name__
             ),
         }
+
+        # ----------------------------------------------------------
+        # Persist failure report when this is a real run
+        # ----------------------------------------------------------
 
         if not config.dry_run:
             try:
@@ -151,34 +246,61 @@ def main():
                 )
 
                 print(
-                    f"[MARKER] writing failure report: {report_path}",
+                    "[MARKER] writing failure report: "
+                    f"{report_path}",
                     flush=True,
                 )
 
-                write_json(report_path, report)
+                write_json(
+                    report_path,
+                    report,
+                )
+
+                print(
+                    "[MARKER] failure report written",
+                    flush=True,
+                )
 
             except Exception as report_exc:
+                # The original implementation intentionally does not
+                # fail again here because the underlying problem might
+                # itself be a storage/permissions issue.
                 print(
-                    f"[MARKER] unable to write failure report: "
-                    f"{type(report_exc).__name__}: {report_exc}",
+                    "[MARKER] unable to write failure report: "
+                    f"{type(report_exc).__name__}: "
+                    f"{report_exc}",
                     flush=True,
                 )
+
+    # --------------------------------------------------------------
+    # Print machine-readable job summary
+    # --------------------------------------------------------------
 
     print(
         "MARKER_SUMMARY="
-        + json.dumps(report, separators=(",", ":")),
+        + json.dumps(
+            report,
+            separators=(",", ":"),
+        ),
         flush=True,
     )
 
     print(
-        f"[MARKER] main completed: "
+        "[MARKER] main completed: "
+        f"status={report.get('status')}, "
+        f"succeeded={report.get('succeeded')}, "
         f"failed={report.get('failed')}, "
-        f"needsGpu={report.get('needsGpu')}, "
-        f"succeeded={report.get('succeeded')}",
+        f"needsGpu={report.get('needsGpu')}",
         flush=True,
     )
 
-    return 1 if report["failed"] or report["needsGpu"] else 0
+    # Preserve original behavior:
+    # failed documents or GPU-required documents make the task fail.
+    return (
+        1
+        if report["failed"] or report["needsGpu"]
+        else 0
+    )
 
 
 if __name__ == "__main__":
