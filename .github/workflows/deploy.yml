@@ -39,7 +39,7 @@ jobs:
       CPU_MAX_PAGES: ${{ vars.CPU_MAX_PAGES || '20' }}
       CPU_MAX_FILE_MB: ${{ vars.CPU_MAX_FILE_MB || '20' }}
       CPU_TIMEOUT_SECONDS: ${{ vars.CPU_TIMEOUT_SECONDS || '900' }}
-      CPU_MAX_RSS_MB: ${{ vars.CPU_MAX_RSS_MB || '6000' }}
+      CPU_MAX_RSS_MB: ${{ vars.CPU_MAX_RSS_MB || '10000' }}
       GPU_TIMEOUT_SECONDS: ${{ vars.GPU_TIMEOUT_SECONDS || '7200' }}
       GPU_WAIT_SECONDS: ${{ vars.GPU_WAIT_SECONDS || '7800' }}
       MAX_SCAN_FILES: ${{ vars.MAX_SCAN_FILES || '10000' }}

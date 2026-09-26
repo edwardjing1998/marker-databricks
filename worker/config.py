@@ -38,7 +38,7 @@ class Config:
     cpu_max_pages: int = 20
     cpu_max_file_mb: int = 20
     cpu_timeout_seconds: int = 900
-    cpu_max_rss_mb: int = 6000
+    cpu_max_rss_mb: int = 10000
     max_file_mb: int = 200
     max_document_pages: int = 5000
     gpu_timeout_seconds: int = 7200
