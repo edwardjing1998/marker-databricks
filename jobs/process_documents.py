@@ -304,4 +304,9 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    exit_code = main()
+
+    if exit_code != 0:
+        raise RuntimeError(
+            f"Marker processing failed with exit code {exit_code}"
+        )
