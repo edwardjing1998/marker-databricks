@@ -1,3 +1,4 @@
+
 name: Deploy marker-databricks
 
 on:
@@ -36,6 +37,9 @@ jobs:
       STATE_VOLUME_PATH: ${{ vars.STATE_VOLUME_PATH }}
       GPU_FALLBACK_ENABLED: ${{ vars.GPU_FALLBACK_ENABLED || 'false' }}
       GPU_LAUNCH_AUTH: oauth-m2m
+      CPU_MODEL_REUSE: ${{ vars.CPU_MODEL_REUSE || 'false' }}
+      CPU_BATCH_SIZE: ${{ vars.CPU_BATCH_SIZE || '5' }}
+      CPU_TORCH_THREADS: ${{ vars.CPU_TORCH_THREADS || '4' }}
       CPU_MAX_PAGES: ${{ vars.CPU_MAX_PAGES || '20' }}
       CPU_MAX_FILE_MB: ${{ vars.CPU_MAX_FILE_MB || '20' }}
       CPU_TIMEOUT_SECONDS: ${{ vars.CPU_TIMEOUT_SECONDS || '900' }}
@@ -58,9 +62,11 @@ jobs:
       GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
     steps:
       - uses: actions/checkout@v5
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Validate deployment configuration
         shell: bash
         run: |
@@ -71,27 +77,34 @@ jobs:
               exit 1
             fi
           done
+
       - name: Install dependencies and run offline tests
         run: |
           python -m pip install -r requirements-dev.txt
           python -m pytest -q
           python -m compileall -q api shared worker jobs scripts
+
       - name: Verify Databricks OAuth without starting compute
         run: python scripts/check_oauth.py
+
       - name: Deploy and verify CPU-first PySpark Python-script job
         id: databricks
         run: python scripts/deploy_databricks.py
+
       - name: Normalize image name
         shell: bash
         run: |
           IMAGE_REPOSITORY="ghcr.io/${GITHUB_REPOSITORY_OWNER}/marker-databricks"
           echo "IMAGE_REPOSITORY=${IMAGE_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - uses: docker/setup-buildx-action@v3
+
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and publish gateway image
         uses: docker/build-push-action@v6
         with:
@@ -101,16 +114,19 @@ jobs:
           tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
       - name: Install OpenShift CLI
         uses: redhat-actions/openshift-tools-installer@v1
         with:
           oc: latest
+
       - name: Log in to OpenShift
         shell: bash
         run: |
           set -euo pipefail
           oc login "$OPENSHIFT_SERVER" --token="$OPENSHIFT_TOKEN"
           oc project "$OPENSHIFT_NAMESPACE"
+
       - name: Remove the old public route and isolate keyless API ingress
         shell: bash
         run: |
@@ -118,6 +134,7 @@ jobs:
           oc delete route marker-databricks --ignore-not-found=true
           oc apply -f openshift/network-policy.yml
           python scripts/check_private_exposure.py
+
       - name: Configure this application's registry secret
         shell: bash
         run: |
@@ -127,6 +144,7 @@ jobs:
             --docker-username="$GHCR_USERNAME" \
             --docker-password="$GHCR_PULL_TOKEN" \
             --dry-run=client -o yaml | oc apply -f -
+
       - name: Configure gateway
         shell: bash
         env:
@@ -146,6 +164,7 @@ jobs:
           # Delete only obsolete fields for THIS application, not shared secrets.
           oc patch secret marker-databricks-secret --type=merge \
             -p '{"data":{"DATABRICKS_TOKEN":null,"MARKER_API_KEY":null}}'
+
       - name: Render and apply OpenShift resources
         shell: bash
         run: |
@@ -166,11 +185,13 @@ jobs:
             echo 'The old public Route was removed. No client API key is required.'
             echo 'Use an authenticated local OpenShift port-forward; do not expose this API publicly.'
           } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload non-secret deployment record
         uses: actions/upload-artifact@v4
         with:
           name: marker-databricks-deployment
           path: databricks/deployed-job.json
+
       - name: Log out of OpenShift
         if: always()
         run: oc logout || true

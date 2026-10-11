@@ -53,6 +53,9 @@ class Config:
     cache_revision: str = 'cpu-first-v3'
     request_id: str = ''
     model_cache_dir: str = '/tmp/marker-models-v1.10.2'
+    cpu_model_reuse: bool = False
+    cpu_batch_size: int = 5
+    cpu_torch_threads: int = 4
 
     def validate(self, require_volumes=True):
         self.source_root, self.output_root = roots(self.source_root, self.output_root)
@@ -69,7 +72,8 @@ class Config:
                              (self.pages_per_chunk, 1, 100), (self.cpu_max_pages, 1, 10000),
                              (self.cpu_max_file_mb, 1, 1024), (self.max_file_mb, 1, 1024),
                              (self.cpu_timeout_seconds, 1, 21600), (self.cpu_max_rss_mb, 256, 64000),
-                             (self.max_document_pages, 1, 10000), (self.gpu_timeout_seconds, 300, 86400)):
+                             (self.max_document_pages, 1, 10000), (self.cpu_batch_size, 1, 50),
+                             (self.cpu_torch_threads, 1, 32), (self.gpu_timeout_seconds, 300, 86400)):
             if not lo <= value <= hi:
                 raise ValueError('A processing safeguard is outside the permitted range')
         if self.gpu_wait_seconds <= self.gpu_timeout_seconds:
@@ -115,13 +119,15 @@ class Config:
             'secret_scope': 'DATABRICKS_SECRET_SCOPE', 'gpu_launch_auth': 'GPU_LAUNCH_AUTH',
             'release_id': 'RELEASE_ID', 'cache_revision': 'MARKER_CACHE_REVISION',
             'model_cache_dir': 'MODEL_CACHE_DIR', 'gpu_enabled': 'GPU_FALLBACK_ENABLED',
+            'cpu_model_reuse': 'CPU_MODEL_REUSE', 'cpu_batch_size': 'CPU_BATCH_SIZE',
+            'cpu_torch_threads': 'CPU_TORCH_THREADS',
         }
         values = {key: fixed[val] for key, val in names.items()}
         values.update(params)
         ints = {'max_scan', 'max_files', 'pages_per_chunk', 'cpu_max_pages', 'cpu_max_file_mb',
                 'cpu_timeout_seconds', 'cpu_max_rss_mb', 'max_file_mb', 'max_document_pages',
-                'gpu_timeout_seconds', 'gpu_wait_seconds'}
-        bools = {'gpu_enabled', 'overwrite', 'replace_existing', 'dry_run', 'force_ocr', 'drop_handwriting'}
+                'gpu_timeout_seconds', 'gpu_wait_seconds', 'cpu_batch_size', 'cpu_torch_threads'}
+        bools = {'gpu_enabled', 'overwrite', 'replace_existing', 'dry_run', 'force_ocr', 'drop_handwriting', 'cpu_model_reuse'}
         return cls(**{k: int(v) if k in ints else boolean(v) if k in bools else v for k, v in values.items()}).validate()
 
 

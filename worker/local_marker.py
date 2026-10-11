@@ -98,7 +98,8 @@ class LocalMarker:
         import torch
         self._torch = torch
         if self.device == 'cpu':
-            torch.set_num_threads(min(4, os.cpu_count() or 1))
+            threads = max(1, int(os.getenv('CPU_TORCH_THREADS', '4')))
+            torch.set_num_threads(min(threads, os.cpu_count() or threads))
             if (torch.ones(4, device='cpu') * 2).sum().item() != 8:
                 raise PipelineError('CPU tensor preflight failed')
             self.device_info = {'device': 'cpu', 'torch': torch.__version__}

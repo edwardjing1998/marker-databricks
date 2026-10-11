@@ -6,6 +6,7 @@ from pathlib import Path
 from shared.errors import PipelineError, CpuResourceLimit
 from worker.config import route_document
 from worker.cpu_runner import run_cpu
+from worker.cpu_session import CpuSession
 from worker.discovery import discover
 from worker.document import (
     convert_and_publish,
@@ -68,7 +69,7 @@ def run_pipeline(
         )
     )
 
-    with context as lock:
+    with context as lock, CpuSession(config) as cpu_session:
         save()
 
         print(
@@ -180,7 +181,7 @@ def run_pipeline(
                             config,
                             record,
                             "cpu",
-                            runner=run_cpu,
+                            runner=(cpu_session.run if getattr(config, "cpu_model_reuse", False) else run_cpu),
                         )
 
                         print(
